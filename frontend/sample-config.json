@@ -1,0 +1,9 @@
+{
+  "service": "payment-gateway",
+  "type": "Cloudflared",
+  "subdomain": "payments",
+  "port": 8443,
+  "replicas": 2,
+  "auth": { "provider": "keycloak", "realm": "standalone" },
+  "env": "production"
+}

@@ -1,0 +1,508 @@
+{
+  "id": "society-events",
+  "realm": "society-events",
+  "displayName": "GM Global Techies Town",
+  "displayNameHtml": "GM Global Techies Town",
+  "loginTheme": "society-events",
+  "enabled": true,
+  "loginWithEmailAllowed": true,
+  "registrationAllowed": true,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "sslRequired": "external",
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "rememberMe": true,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "ssoSessionIdleTimeoutRememberMe": 604800,
+  "ssoSessionMaxLifespanRememberMe": 2592000,
+  "refreshTokenMaxReuse": 0,
+  "revokeRefreshToken": true,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Society administrator \u2014 full access"
+      },
+      {
+        "name": "committee_member",
+        "description": "Can create and manage events"
+      },
+      {
+        "name": "resident",
+        "description": "Can register for events and make payments"
+      },
+      {
+        "name": "security_guard",
+        "description": "Can scan QR codes at entry"
+      },
+      {
+        "name": "sponsor",
+        "description": "External sponsor \u2014 can view sponsored events and manage refund requests"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "society-frontend",
+      "name": "Society Events \u2014 Web App",
+      "description": "Public PKCE client for the React/Vue micro-frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost/*",
+        "http://localhost:3000/*",
+        "http://localhost:3001/*",
+        "http://localhost:4004/*",
+        "http://localhost:4005/*",
+        "http://localhost:3001/docs/oauth2-redirect",
+        "http://localhost:4200/*",
+        "http://localhost:5173/*",
+        "http://localhost:8080/*",
+        "http://192.168.1.11/*",
+        "http://192.168.1.11:8080/*",
+        "http://192.168.1.11:3000/*",
+        "https://gm-global-techies-town.club/*",
+        "https://www.gm-global-techies-town.club/*"
+      ],
+      "webOrigins": [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:4004",
+        "http://localhost:4005",
+        "http://localhost:4200",
+        "http://localhost:5173",
+        "http://localhost:8080",
+        "http://192.168.1.11",
+        "http://192.168.1.11:8080",
+        "https://gm-global-techies-town.club",
+        "https://www.gm-global-techies-town.club",
+        "http://192.168.1.11:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "society-api",
+      "name": "Society Events \u2014 API Gateway",
+      "description": "Confidential client for backend microservices to validate tokens",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "secret": "${env.KEYCLOAK_API_CLIENT_SECRET}",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "otp-bridge",
+      "name": "OTP Bridge Service",
+      "description": "Internal service for mobile OTP authentication (token exchange / impersonation)",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${env.OTP_BRIDGE_CLIENT_SECRET}",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "attributes": {
+        "display.on.consent.screen": "false",
+        "oauth2.token.response.key.include.id.token.true": "false"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "username": "rajesh.iyer",
+      "email": "rajesh.iyer@pvh-blr.in",
+      "firstName": "Rajesh",
+      "lastName": "Iyer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "committee_member",
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "username": "meera.krishnan",
+      "email": "meera.krishnan@gmail.com",
+      "firstName": "Meera",
+      "lastName": "Krishnan",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "committee_member",
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000003",
+      "username": "arjun.sharma",
+      "email": "arjun.sharma@gmail.com",
+      "firstName": "Arjun",
+      "lastName": "Sharma",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000004",
+      "username": "priya.nair",
+      "email": "priya.nair@gmail.com",
+      "firstName": "Priya",
+      "lastName": "Nair",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000005",
+      "username": "sanjay.mehta",
+      "email": "sanjay.mehta@outlook.com",
+      "firstName": "Sanjay",
+      "lastName": "Mehta",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000006",
+      "username": "vikram.patel",
+      "email": "vikram.patel@gmail.com",
+      "firstName": "Vikram",
+      "lastName": "Patel",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000007",
+      "username": "kavya.reddy",
+      "email": "kavya.reddy@techcorp.com",
+      "firstName": "Kavya",
+      "lastName": "Reddy",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "sponsor"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000008",
+      "username": "bala.pethuchetty",
+      "email": "balavigneskumar@gmail.com",
+      "firstName": "Bala",
+      "lastName": "Pethuchetty",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "committee_member",
+        "resident"
+      ]
+    },
+    {
+      "id": "a1000000-0000-0000-0000-000000000009",
+      "username": "ramu.guard",
+      "email": "ramu.guard@pvh-blr.in",
+      "firstName": "Ramu",
+      "lastName": "Kumar",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test@1234",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "security_guard"
+      ]
+    },
+    {
+      "username": "service-account-otp-bridge",
+      "enabled": true,
+      "serviceAccountClientId": "otp-bridge",
+      "clientRoles": {
+        "realm-management": [
+          "impersonation"
+        ]
+      }
+    }
+  ],
+  "registrationEmailAsUsername": false,
+  "verifyEmail": false,
+  "smtpServer": {
+    "host": "smtp.gmail.com",
+    "port": "587",
+    "from": "${env.GMAIL_SMTP_USER}",
+    "fromDisplayName": "GM Global Techies Town",
+    "auth": "true",
+    "ssl": "false",
+    "starttls": "true",
+    "user": "${env.GMAIL_SMTP_USER}",
+    "password": "${env.GMAIL_APP_PASSWORD}"
+  },
+  "attributes": {
+    "userProfileEnabled": "true"
+  },
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": false,
+      "updateProfileFirstLoginMode": "off",
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login - google",
+      "config": {
+        "clientId": "${env.GOOGLE_CLIENT_ID:-}",
+        "clientSecret": "${env.GOOGLE_CLIENT_SECRET:-}",
+        "defaultScope": "openid profile email",
+        "disableUserInfo": "false",
+        "useJwksUrl": "true",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "review profile config",
+      "config": {
+        "update.profile.on.first.login": "missing"
+      }
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "first broker login - google",
+      "description": "First broker login flow for Google \u2014 auto-links existing accounts by email, creates new ones otherwise",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorConfig": "review profile config",
+          "authenticator": "idp-review-profile",
+          "requirement": "DISABLED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "idp-auto-link",
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "requirement": "REQUIRED",
+          "priority": 30,
+          "flowAlias": "User creation or linking",
+          "autheticatorFlow": true,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "User creation or linking",
+      "description": "Flow for existing / new user handling",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-create-user-if-unique",
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "flowAlias": "Handle Existing Account",
+          "autheticatorFlow": true,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "Handle Existing Account",
+      "description": "Handle what to do if there is an existing account with the same email",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-confirm-link",
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "flowAlias": "Account verification options",
+          "autheticatorFlow": true,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "Account verification options",
+      "description": "Method with which to verify the existing account",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-email-verification",
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "flowAlias": "Verify Existing Account by Re-authentication",
+          "autheticatorFlow": true,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "Verify Existing Account by Re-authentication",
+      "description": "Reauthentication of existing account",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-username-password-form",
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "requirement": "OPTIONAL",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ]
+}

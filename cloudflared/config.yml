@@ -1,0 +1,31 @@
+tunnel: 4f6ad36b-5a4a-4f31-9612-b11129f33205
+credentials-file: /etc/cloudflared/4f6ad36b-5a4a-4f31-9612-b11129f33205.json
+protocol: http2
+
+# Centralized tunnel — routes the event-management app, Keycloak auth, and admin tools.
+#
+# gm-global-techies-town.club         → event-management nginx (host port NGINX_PORT).
+# auth.gm-global-techies-town.club    → Keycloak (inside this Podman stack).
+# auth-api.gm-global-techies-town.club → auth-service backend (inside this Podman stack).
+# pgadmin.gm-global-techies-town.club → pgAdmin DB GUI (via nginx → pgadmin container).
+# splunk.gm-global-techies-town.club  → Splunk (centralized ~/splunk-service, port 8000 direct).
+#
+# host.containers.internal resolves to the Podman host (same machine).
+# If NGINX_PORT is not 8080, update the port below to match.
+
+ingress:
+  - hostname: gm-global-techies-town.club
+    service: http://host.containers.internal:8080
+  - hostname: www.gm-global-techies-town.club
+    service: http://host.containers.internal:8080
+  - hostname: auth.gm-global-techies-town.club
+    service: http://keycloak:8080
+  - hostname: auth-api.gm-global-techies-town.club
+    service: http://backend:8000
+  - hostname: pgadmin.gm-global-techies-town.club
+    service: http://host.containers.internal:8080
+  - hostname: splunk.gm-global-techies-town.club
+    service: https://host.containers.internal:8002
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
