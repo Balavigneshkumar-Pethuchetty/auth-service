@@ -14,6 +14,7 @@ import yaml
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from . import cloudflare_api, keycloak_admin, models, schemas
 from .auth import get_current_user
@@ -113,9 +114,9 @@ _REALM_JSON_PATH = Path(os.getenv("REALM_JSON_PATH", "/opt/realm/realm.json"))
 
 def _sync_config_yml_services(db: Session) -> None:
     """
-    Read config.yml and create a Service row for every named ingress route
-    that doesn't already have a matching subdomain in the DB.
-    Runs on every startup so new tunnel routes appear in the dashboard automatically.
+    Read config.yml and create (or update) a Service row for every named ingress route.
+    New routes are inserted; existing rows that were originally synced from config.yml
+    get their service URL and health_url refreshed so stale ports are corrected on restart.
     """
     try:
         with open(_CONFIG_PATH) as f:
@@ -124,7 +125,7 @@ def _sync_config_yml_services(db: Session) -> None:
         return
 
     domain = get_domain(db)
-    existing = {s.subdomain for s in db.query(models.Service).all()}
+    all_svcs = {s.subdomain: s for s in db.query(models.Service).all()}
     SKIP = {"www", "auth-api"}
 
     for rule in cfg.get("ingress", []):
@@ -133,16 +134,14 @@ def _sync_config_yml_services(db: Session) -> None:
         if not hostname or not service_url or "http_status" in service_url:
             continue
 
-        # Extract subdomain from hostname
         if hostname in (domain, f"www.{domain}"):
             continue
         if not hostname.endswith(f".{domain}"):
             continue
         subdomain = hostname[: -(len(domain) + 1)]
-        if not subdomain or subdomain in SKIP or subdomain in existing:
+        if not subdomain or subdomain in SKIP:
             continue
 
-        # Derive a clean health_url from the service URL (strip path)
         try:
             parsed = urlparse(service_url)
             port = parsed.port or 8080
@@ -150,15 +149,26 @@ def _sync_config_yml_services(db: Session) -> None:
         except Exception:
             port, health_url = 8080, service_url
 
-        db.add(models.Service(
-            name=subdomain,
-            type="Service",
-            subdomain=subdomain,
-            port=port,
-            status="active",
-            config={"service": service_url, "health_url": health_url, "synced_from": "config.yml"},
-        ))
-        existing.add(subdomain)
+        if subdomain in all_svcs:
+            # Re-sync URL fields for config.yml-managed services so port changes propagate.
+            existing_svc = all_svcs[subdomain]
+            if (existing_svc.config or {}).get("synced_from") == "config.yml":
+                existing_svc.config = {
+                    **existing_svc.config,
+                    "service": service_url,
+                    "health_url": health_url,
+                }
+                flag_modified(existing_svc, "config")
+        else:
+            db.add(models.Service(
+                name=subdomain,
+                type="Service",
+                subdomain=subdomain,
+                port=port,
+                status="active",
+                config={"service": service_url, "health_url": health_url, "synced_from": "config.yml"},
+            ))
+            all_svcs[subdomain] = None
 
     db.commit()
 
