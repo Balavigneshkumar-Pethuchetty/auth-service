@@ -8,6 +8,8 @@ import Upload from "./pages/Upload.jsx";
 import Detail from "./pages/Detail.jsx";
 import Settings from "./pages/Settings.jsx";
 import Tunnel from "./pages/Tunnel.jsx";
+import Monitor from "./pages/Monitor.jsx";
+import OtpTransactions from "./pages/OtpTransactions.jsx";
 
 function RequireAuth({ children }) {
   const { initialized, authenticated, keycloak } = useKeycloak();
@@ -52,6 +54,8 @@ export default function App() {
           <Route path="/services/:id" element={<Detail />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/tunnel" element={<Tunnel />} />
+          <Route path="/monitor" element={<Monitor />} />
+          <Route path="/otp-transactions" element={<OtpTransactions />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

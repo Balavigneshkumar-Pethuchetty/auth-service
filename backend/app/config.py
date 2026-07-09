@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""
     cloudflare_tunnel_id: str = ""
 
+    # OTP (SMS gateway delivery + verification lifecycle)
+    otp_length: int = 6
+    otp_ttl_seconds: int = 300
+    otp_resend_cooldown_seconds: int = 60
+    otp_max_attempts: int = 5
+    otp_max_resends: int = 3
+    otp_pepper: str = ""  # used when hashing codes for storage
+    otp_service_api_key: str = ""  # shared secret for the Keycloak authenticator SPI
+
     class Config:
         env_file = ".env"
         env_prefix = ""

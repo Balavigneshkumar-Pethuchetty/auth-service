@@ -139,6 +139,16 @@
               ${p.displayName!p.alias}
             </a>
           </#list>
+          <a class="provider-button" href="https://gm-global-techies-town.club/mobile-login" id="social-mobile-otp">
+            📱 Sign in with Mobile OTP
+          </a>
+        </div>
+      <#else>
+        <div class="divider"><span>or continue with</span></div>
+        <div class="provider-list">
+          <a class="provider-button" href="https://gm-global-techies-town.club/mobile-login" id="social-mobile-otp">
+            📱 Sign in with Mobile OTP
+          </a>
         </div>
       </#if>
 

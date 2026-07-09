@@ -6,6 +6,8 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/upload", label: "Upload Config" },
   { to: "/tunnel", label: "Tunnel Routes" },
+  { to: "/monitor", label: "OTP & SMS Monitor" },
+  { to: "/otp-transactions", label: "OTP Transactions" },
   { to: "/settings", label: "Settings" },
 ];
 

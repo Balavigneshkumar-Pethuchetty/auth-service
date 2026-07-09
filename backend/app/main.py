@@ -1,22 +1,23 @@
 import asyncio
+import hmac
 import json
 import os
 import socket
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
 
 import yaml
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from . import cloudflare_api, keycloak_admin, models, schemas
+from . import cloudflare_api, keycloak_admin, models, otp_service, schemas, sms_gateway
 from .auth import get_current_user
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
@@ -29,6 +30,18 @@ _background: set = set()
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+def require_service_key(x_api_key: str = Header(default="")) -> None:
+    """
+    Auth for server-to-server callers (the Keycloak SMS-OTP authenticator SPI)
+    that don't have an end-user bearer token — the whole point of this call
+    is to authenticate a user who hasn't finished logging in yet.
+    """
+    if not settings.otp_service_api_key:
+        raise HTTPException(503, "OTP service API key not configured")
+    if not hmac.compare_digest(x_api_key, settings.otp_service_api_key):
+        raise HTTPException(401, "invalid API key")
+
 
 def get_domain(db: Session) -> str:
     row = db.get(models.Setting, "domain")
@@ -565,6 +578,176 @@ async def export_realm_to_file(_user: dict = Depends(get_current_user)):
         return {"saved": True, "realm": realm.get("realm")}
     except Exception as exc:
         raise HTTPException(500, f"Export failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# SMS gateways (OTP delivery via committee phones, over Tailscale)
+# ---------------------------------------------------------------------------
+
+def _serialize_gateway(gw: models.SmsGateway) -> dict:
+    return {
+        "id": gw.id,
+        "label": gw.label,
+        "host": gw.host,
+        "port": gw.port,
+        "username": gw.username,
+        "priority": gw.priority,
+        "enabled": gw.enabled,
+        "last_status": gw.last_status,
+        "last_checked_at": gw.last_checked_at.isoformat() if gw.last_checked_at else None,
+        "created_at": gw.created_at.isoformat() if gw.created_at else None,
+    }
+
+
+@app.get("/api/sms-gateways")
+def list_sms_gateways(
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    gateways = db.query(models.SmsGateway).order_by(models.SmsGateway.priority.asc()).all()
+    return [_serialize_gateway(g) for g in gateways]
+
+
+@app.post("/api/sms-gateways", response_model=schemas.SmsGatewayOut)
+def create_sms_gateway(
+    payload: schemas.SmsGatewayCreate,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    gw = models.SmsGateway(**payload.model_dump())
+    db.add(gw)
+    db.commit()
+    db.refresh(gw)
+    return _serialize_gateway(gw)
+
+
+@app.patch("/api/sms-gateways/{gateway_id}", response_model=schemas.SmsGatewayOut)
+def update_sms_gateway(
+    gateway_id: str,
+    payload: schemas.SmsGatewayUpdate,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    gw = db.get(models.SmsGateway, gateway_id)
+    if not gw:
+        raise HTTPException(404, "gateway not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(gw, field, value)
+    db.commit()
+    db.refresh(gw)
+    return _serialize_gateway(gw)
+
+
+@app.delete("/api/sms-gateways/{gateway_id}")
+def delete_sms_gateway(
+    gateway_id: str,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    gw = db.get(models.SmsGateway, gateway_id)
+    if not gw:
+        raise HTTPException(404, "gateway not found")
+    db.delete(gw)
+    db.commit()
+    return {"deleted": gateway_id}
+
+
+@app.post("/api/sms-gateways/{gateway_id}/ping")
+async def ping_sms_gateway(
+    gateway_id: str,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    return await sms_gateway.ping(db, gateway_id)
+
+
+@app.post("/api/sms-gateways/test-send")
+async def test_send_sms(
+    payload: schemas.SmsSendRequest,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """Manually trigger a send through the failover chain from the dashboard
+    (JWT-authenticated) — used to verify a gateway is actually working."""
+    return await sms_gateway.send_otp(db, payload.phone, payload.message)
+
+
+@app.post("/api/sms/send")
+async def send_sms(
+    payload: schemas.SmsSendRequest,
+    db: Session = Depends(get_db),
+    _key: None = Depends(require_service_key),
+):
+    """Machine-to-machine send for other projects (e.g. event-management's
+    own OTP service) that own their own OTP generation/verification and just
+    need a transport. Auth is the shared service API key, not a dashboard JWT."""
+    return await sms_gateway.send_otp(db, payload.phone, payload.message)
+
+
+# ---------------------------------------------------------------------------
+# event-management OTP transactions (cross-project dashboard proxy)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/event-otp/transactions")
+async def event_management_otp_transactions(_user: dict = Depends(get_current_user)):
+    """
+    Proxies event-management's otp-service transaction rollup so the shared
+    dashboard can show real login OTP activity, without exposing the
+    cross-service shared key to the browser (the JWT gate here is what the
+    rest of this dashboard already relies on).
+    """
+    url = "http://host.containers.internal:8080/api/otp/transactions"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, headers={"X-Auth-Service-Key": settings.otp_service_api_key})
+            r.raise_for_status()
+            return r.json()
+    except Exception as exc:
+        raise HTTPException(502, f"Could not reach event-management otp-service: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# OTP verification (auth-service's own turnkey OTP lifecycle, for future
+# projects that don't want to build their own OTP generation/verification —
+# event-management uses its own, and only calls /api/sms/send above)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/otp/request")
+async def otp_request(
+    payload: schemas.OtpRequestCreate,
+    db: Session = Depends(get_db),
+    _key: None = Depends(require_service_key),
+):
+    phone = payload.phone.strip()
+    if not phone:
+        raise HTTPException(400, "phone is required")
+
+    result = await otp_service.request_otp(db, phone)
+
+    if result.get("error") == "cooldown":
+        raise HTTPException(429, {"error": "cooldown", "retry_after": result["retry_after"]})
+    if result.get("error") == "max_resends_reached":
+        raise HTTPException(429, {"error": "max_resends_reached"})
+    return result
+
+
+@app.post("/api/otp/verify")
+def otp_verify(
+    payload: schemas.OtpVerifyRequest,
+    db: Session = Depends(get_db),
+    _key: None = Depends(require_service_key),
+):
+    return otp_service.verify_otp(db, payload.request_id, payload.code)
+
+
+@app.get("/api/otp/history")
+def otp_history(
+    phone: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """Dashboard-facing audit view — uses normal admin login, not the service key."""
+    return otp_service.history(db, phone)
 
 
 # ---------------------------------------------------------------------------

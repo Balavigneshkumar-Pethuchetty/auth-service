@@ -4,11 +4,13 @@ protocol: http2
 
 # Centralized tunnel — routes the event-management app, Keycloak auth, and admin tools.
 #
-# gm-global-techies-town.club         → event-management nginx (host port NGINX_PORT).
-# auth.gm-global-techies-town.club    → Keycloak (inside this Podman stack).
+# gm-global-techies-town.club          → event-management nginx (host port NGINX_PORT).
+# auth.gm-global-techies-town.club     → Keycloak (inside this Podman stack).
 # auth-api.gm-global-techies-town.club → auth-service backend (inside this Podman stack).
-# pgadmin.gm-global-techies-town.club → pgAdmin DB GUI (via nginx → pgadmin container).
-# splunk.gm-global-techies-town.club  → Splunk (centralized ~/splunk-service, port 8000 direct).
+# pay.gm-global-techies-town.club      → payment-reconciliation API (host port 8001).
+# chat.gm-global-techies-town.club     → Ollama Chat app (host port 8082).
+# pgadmin.gm-global-techies-town.club  → pgAdmin DB GUI (via nginx → pgadmin container).
+# splunk.gm-global-techies-town.club   → Splunk (centralized ~/splunk-service, port 8000 direct).
 #
 # host.containers.internal resolves to the Podman host (same machine).
 # If NGINX_PORT is not 8080, update the port below to match.
@@ -22,6 +24,10 @@ ingress:
     service: http://keycloak:8080
   - hostname: auth-api.gm-global-techies-town.club
     service: http://backend:8000
+  - hostname: chat.gm-global-techies-town.club
+    service: http://host.containers.internal:8082
+  - hostname: pay.gm-global-techies-town.club
+    service: http://host.containers.internal:8001
   - hostname: pgadmin.gm-global-techies-town.club
     service: http://host.containers.internal:8080
   - hostname: splunk.gm-global-techies-town.club

@@ -46,3 +46,16 @@ export const getKeycloakRealm = () => client.get("/keycloak/realm").then((r) => 
 export const getRealmFile = () => client.get("/keycloak/realm-file").then((r) => r.data);
 export const saveRealmFile = (body) => client.put("/keycloak/realm-file", body).then((r) => r.data);
 export const exportRealmToFile = () => client.post("/keycloak/realm-export-to-file").then((r) => r.data);
+
+export const listSmsGateways = () => client.get("/sms-gateways").then((r) => r.data);
+export const createSmsGateway = (body) => client.post("/sms-gateways", body).then((r) => r.data);
+export const updateSmsGateway = (id, body) => client.patch(`/sms-gateways/${id}`, body).then((r) => r.data);
+export const deleteSmsGateway = (id) => client.delete(`/sms-gateways/${id}`).then((r) => r.data);
+export const pingSmsGateway = (id) => client.post(`/sms-gateways/${id}/ping`).then((r) => r.data);
+export const testSendSms = (body) => client.post("/sms-gateways/test-send", body).then((r) => r.data);
+
+export const getOtpHistory = (phone) =>
+  client.get("/otp/history", { params: phone ? { phone } : {} }).then((r) => r.data);
+
+export const getEventManagementOtpTransactions = () =>
+  client.get("/event-otp/transactions").then((r) => r.data);

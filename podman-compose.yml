@@ -3,6 +3,7 @@ version: "3.8"
 services:
   db:
     image: docker.io/library/postgres:16-alpine
+    restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,7 +22,8 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
-    command: ["start-dev", "--import-realm"]
+    command: ["start-dev", "--import-realm", "--features=token-exchange"]
+    restart: always
     env_file: .env
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
@@ -49,6 +51,7 @@ services:
 
   backend:
     build: ./backend
+    restart: always
     env_file: .env
     depends_on:
       db:
@@ -64,15 +67,34 @@ services:
 
   frontend:
     build: ./frontend
+    restart: always
     env_file: .env
     depends_on:
       - backend
     ports:
       - "5174:5174"
 
+  tailscale:
+    image: docker.io/tailscale/tailscale:latest
+    hostname: auth-service-relay
+    restart: always
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=true
+      - TS_SOCKS5_SERVER=0.0.0.0:1055
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   cloudflared:
     image: docker.io/cloudflare/cloudflared:latest
     command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    restart: always
     volumes:
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/4f6ad36b-5a4a-4f31-9612-b11129f33205.json:/etc/cloudflared/4f6ad36b-5a4a-4f31-9612-b11129f33205.json:ro
@@ -88,3 +110,4 @@ services:
 volumes:
   pgdata:
   kcdata:
+  tailscale-state:
