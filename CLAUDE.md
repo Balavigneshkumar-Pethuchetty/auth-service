@@ -7,11 +7,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Centralized infrastructure for all society projects on this host: **Keycloak**
 (OAuth2/OIDC — one shared realm per project, e.g. `standalone` for this repo's
 own dashboard, `society-events` for `~/event-management`), a **Cloudflare
-Tunnel** (public reachability for every registered subdomain), and — added in
-this session — a **free, self-hosted SMS/OTP gateway** built on committee
-members' Android phones reached over Tailscale. Sibling projects (like
-`~/event-management`) register with this repo rather than running their own
-Keycloak/tunnel/SMS infrastructure.
+Tunnel** (public reachability for every registered subdomain), and a **free
+SMS/OTP gateway** built on committee members' Android phones running the
+open-source [SMS Gateway for Android](https://github.com/capcom6/android-sms-gateway)
+app in **Cloud Server** mode, sending through the app developer's free hosted
+relay (`api.sms-gate.app`). Sibling projects (like `~/event-management`)
+register with this repo rather than running their own Keycloak/tunnel/SMS
+infrastructure.
+
+**Note**: only `society-events` is sourced from the checked-in
+`keycloak/realm.json` (imported via `--import-realm` on first boot). The
+`standalone` realm (this repo's own dashboard) exists live in Keycloak but
+has **no corresponding file in this repo** — it was created out-of-band (UI
+or Admin API), so changes to it (e.g. authentication flow/required-action
+config) only exist in the `kcdata` volume, not in git. A fresh clone +
+`podman-compose up` would **not** recreate `standalone` as currently
+configured. There's also an unrelated `ollama-chat` realm live in the same
+Keycloak instance, outside this repo's scope entirely.
 
 Run with `podman-compose` (not `docker-compose`) from the repo root.
 
@@ -21,7 +33,7 @@ Run with `podman-compose` (not `docker-compose`) from the repo root.
 podman-compose ps                          # health status of all containers
 podman-compose up -d <service>             # bring up one service (see Deploy gotchas below)
 podman-compose build <service>             # rebuild an image after requirements.txt/Dockerfile changes
-podman logs --tail 50 auth-service_<svc>_1 # e.g. backend, frontend, keycloak, tailscale, cloudflared, db
+podman logs --tail 50 auth-service_<svc>_1 # e.g. backend, frontend, keycloak, cloudflared, db
 ```
 
 There is no test suite in this repo.
@@ -34,8 +46,7 @@ from `depends_on`: `backend` requires `keycloak`+`db`; `frontend` requires
 `backend`; `cloudflared` requires `frontend`+`backend`. Consequence: **you
 cannot remove/recreate `db` or `keycloak` without cascading through
 `backend`→`frontend`→`cloudflared`** — Podman refuses partial removal
-otherwise. `tailscale` is independent (nothing requires it, so it never gets
-pulled into a cascade started elsewhere).
+otherwise.
 
 Two different deploy paths depending on what changed:
 
@@ -68,56 +79,87 @@ Two different deploy paths depending on what changed:
   ```
   In practice `podman-compose up -d` after any partial removal has, every
   time this session, ended up recreating the **whole pod** (including `db`
-  and `tailscale` even though they weren't removed) — this is harmless, just
-  surprising. **No data is lost either way**: Postgres data (`pgdata`),
-  Keycloak data (`kcdata`), and Tailscale's node identity (`tailscale-state`)
-  all live in named volumes, completely decoupled from container lifecycle.
-  Tailscale in particular reconnects using its existing identity after a
-  recreate — it does **not** need `TS_AUTHKEY` again unless the
-  `tailscale-state` volume itself is wiped.
+  even though it wasn't removed) — this is harmless, just surprising. **No
+  data is lost either way**: Postgres data (`pgdata`) and Keycloak data
+  (`kcdata`) both live in named volumes, completely decoupled from container
+  lifecycle.
 
 ## SMS Gateway / OTP system
 
 **Why it exists**: avoid paying for Twilio/etc. Instead, committee members'
 own Android phones run the open-source [SMS Gateway for
-Android](https://github.com/capcom6/android-sms-gateway) app (install the
-**release** APK, not `-insecure`, from its GitHub Releases — it's not on the
-Play Store) in **local-server mode**, reached over a private
-[Tailscale](https://tailscale.com) network instead of exposing anything to
-the public internet.
+Android](https://github.com/capcom6/android-sms-gateway) app with **Cloud
+Server** mode toggled on. The phone dials *out* to the app developer's free
+hosted relay (`api.sms-gate.app`) and self-registers, auto-generating a
+username/password shown in the app's Cloud Server settings — no inbound
+server on the phone and no private networking needed, so this backend also
+just calls `https://api.sms-gate.app` directly over the public internet with
+those same credentials via HTTP Basic Auth.
 
-### Networking: why a Tailscale *sidecar*, not `network_mode: service:tailscale`
-
-The `tailscale` service in `podman-compose.yml` runs in **userspace
-networking mode** (`TS_USERSPACE=true`) and exposes a **SOCKS5 proxy on port
-1055**. Two things this avoids:
-
-- Kernel networking mode (`TS_USERSPACE=false`) needs real `NET_ADMIN`/TUN
-  access, which rootless Podman won't grant — it fails with `iptables ...
-  Permission denied (you must be root)`. Userspace mode sidesteps this
-  entirely since it never touches the host network stack.
-- Making `backend` join Tailscale's network namespace directly
-  (`network_mode: "service:tailscale"`) would have made `backend` lose its
-  own `backend` DNS alias inside the compose network — which `frontend` and
-  `cloudflared` depend on. The SOCKS5-proxy-sidecar approach avoids touching
-  how any other container already resolves `backend`.
-
-`backend`'s own outbound HTTP client reaches phones through this proxy
-(`socks5://tailscale:1055` — note: **`socks5://` not `socks5h://`**, since
-httpx 0.27's `Proxy` class only recognizes the former; targets are Tailscale
-IPs anyway, so no DNS-through-proxy is needed).
+(Two earlier iterations of this gateway were tried and retired: first
+capcom6/android-sms-gateway in **local-server** mode reached over a private
+Tailscale network, then [httpSMS](https://httpsms.com)'s cloud API. Neither
+remains in this repo — no Tailscale sidecar, SOCKS5 proxy, or httpSMS
+`x-api-key` code is left.)
 
 ### Data model & code
 
 - **`sms_gateways`** table (Postgres, `backend/app/models.py`) — the
   configurable, priority-ordered fallback list of committee phones: label,
-  Tailscale host/IP, port, Basic-Auth username/password (from the phone
-  app's Settings tab), priority (lower = tried first), enabled, last known
-  status. Managed via `/api/sms-gateways` CRUD + the dashboard's **"OTP & SMS
-  Monitor"** page (`frontend/src/pages/Monitor.jsx`).
+  the app's auto-generated Cloud Server `username`/`password`, `device_id`
+  (explicitly targets this phone in the send payload — Cloud Server accounts
+  can have multiple devices, and omitting it lets `api.sms-gate.app`
+  randomly pick any connected device on the account), priority (lower =
+  tried first), enabled, last known status. Managed via `/api/sms-gateways`
+  CRUD + the dashboard's **"OTP & SMS Monitor"** page
+  (`frontend/src/pages/Monitor.jsx`).
 - **`backend/app/sms_gateway.py`** — `send_otp(db, phone, text)` tries every
-  enabled gateway in priority order over the SOCKS5 proxy, logs every
-  attempt, returns on first success. This is the core failover logic.
+  enabled gateway in priority order, `POST`ing to
+  `https://api.sms-gate.app/3rdparty/v1/message` with HTTP Basic Auth
+  (`gw.username`/`gw.password`) and body `{"textMessage": {"text": ...},
+  "phoneNumbers": [...], "deviceId": ...}`. This is the core failover logic
+  — **confirmed working via a real curl call** (`POST /api/sms/send`
+  returned `{"sent":true,"via":"<label>"}` and the cloud relay did route it
+  to the registered device). The `ping()` function is a stub that always
+  tells the caller to use `/api/sms-gateways/test-send` instead of claiming
+  a real status — capcom6's Cloud Server mode has no synchronous per-device
+  status endpoint (only a webhook, `system:ping`, which would need this
+  backend to expose a public callback URL — not implemented). **Note**:
+  `/api/sms-gateways/test-send` itself has no dashboard UI wired to it yet —
+  `testSendSms()` exists in `frontend/src/lib/api.js` but nothing in
+  `Monitor.jsx` calls it. Trigger it via `curl` (JWT or reuse
+  `/api/sms/send` with the service key) until that gap is closed.
+
+### Known limitation: Indian carriers block OTP-pattern SMS from personal SIMs
+
+Confirmed by direct testing: a message like `"Your verification code is
+123456. It expires in 5 minutes."` fails with Android's
+`RESULT_ERROR_GENERIC_FAILURE`, sent **manually** from the phone's own native
+Messages app — no gateway app or this backend involved. A generic-content
+message (`"hi"`) sends fine from the same SIM. This means it's **carrier-side
+anti-phishing content filtering** (both test SIMs were Jio), not a bug
+anywhere in this repo, not a SIM-selection issue, and not specific to any
+gateway app — it happens at the network level before the message leaves the
+device, so a custom-built gateway app would hit the exact same wall.
+
+This is a fundamental constraint on the entire "free SMS via personal SIM"
+approach for real OTP content in India: TRAI regulations require
+transactional/OTP SMS to go through a DLT-registered sender with an approved
+template via a proper A2P aggregator — a personal SIM's P2P route gets
+filtered specifically because "OTP-shaped" text sent from a random consumer
+number is a common phishing pattern. **Don't try to reword OTP messages to
+dodge this filter** — it's evading an anti-fraud control, it's fragile
+(filters adapt), and repeated triggering risks the SIM itself getting
+rate-limited/suspended by the carrier, which would break gateway delivery
+entirely, not just OTP content.
+
+Real fixes, if this needs to be reliable: (a) a proper DLT-registered SMS
+provider (paid — the cost this whole approach was trying to avoid), or (b) a
+non-SMS channel for verification content specifically — WhatsApp Business
+API, email OTP, or (for repeat-login 2FA only, **not** one-time phone-number
+verification — TOTP has no phone number in its protocol at all) an
+authenticator app. See "Keycloak TOTP 2FA" below for the one piece of this
+that's actually been implemented.
 - **`POST /api/sms/send`** — machine-to-machine endpoint for *other*
   projects that just need "send this text to this phone" (auth: `X-API-Key`
   header = `OTP_SERVICE_API_KEY` from `.env`). This is what
@@ -158,41 +200,6 @@ podman inspect auth-service_keycloak_1 --format '{{.Config.Cmd}}'
 Fixing it requires recreating the `keycloak` container (see Deploy gotchas —
 this cascades through `backend`/`frontend`/`cloudflared` too).
 
-### Troubleshooting: "Proxy Server could not connect: General SOCKS server failure"
-
-**Symptom**: an OTP transaction shows `sms_delivery_failed: true`, or
-`society_otp_service` logs show `[SMS-AUTHSVC] Failed ...: Proxy Server could
-not connect: General SOCKS server failure.`
-
-**Usual cause**: the `tailscale` container was just recreated (any full
-`podman-compose up -d` after removing containers recreates the whole pod,
-including `tailscale` — see Deploy gotchas) and its WireGuard connection to
-the phone hadn't fully re-established yet. This takes a few seconds, not
-minutes.
-
-**How to verify**:
-```bash
-# 1. Is the phone actually online in the tailnet? "idle" is fine, "offline" is not.
-podman exec auth-service_tailscale_1 tailscale status
-
-# 2. curl isn't persisted in the tailscale image across recreates — reinstall if needed:
-podman exec auth-service_tailscale_1 apk add --no-cache curl
-
-# 3. Direct test through the same path the backend uses (get host/port/creds
-#    from the sms_gateways table / dashboard):
-podman exec auth-service_tailscale_1 curl -s -m 8 \
-  --socks5-hostname 127.0.0.1:1055 -u <gw_username>:<gw_password> \
-  http://<phone-tailscale-ip>:<port>/health
-# expect a 200 JSON payload with "status":"pass"
-```
-
-**Fix**: usually nothing to do but wait ~30s and retry — it self-resolves
-once Tailscale's peer connection re-establishes. If the phone genuinely shows
-`offline` for more than a couple minutes, check the phone itself (is the
-SMSGate app's "Local server" toggle still on? Is Tailscale still running? See
-"Adding a new gateway phone" below for the battery-optimization settings that
-prevent this).
-
 **Known limitation**: redeploying `auth-service` while a real OTP request is
 in flight will drop that specific send. Fine for current dev/debugging
 volume; would need a graceful-drain strategy before this serves real users
@@ -209,15 +216,36 @@ at scale.
 3. Turn **off** "Manage app if unused" in the app's permission settings —
    otherwise Android's auto-revoke can silently strip SMS permission after
    months of inactivity.
-4. Install Tailscale on the phone and join the same tailnet as this repo's
-   `tailscale` sidecar.
-5. In the SMSGate app: enable **Local server**, note the port (Settings tab
-   also shows a generated username/password for Basic Auth).
-6. Get the phone's Tailscale IP: `podman exec auth-service_tailscale_1
-   tailscale status`.
-7. Register it: dashboard → **OTP & SMS Monitor** → "Add gateway phone" (or
-   `POST /api/sms-gateways`), then use its **Ping** button to confirm
-   reachability before relying on it.
+4. In the app, toggle on **Cloud Server** mode (not Local Server) and tap to
+   connect — no account/signup needed. Once it shows "Online", the app's
+   Cloud Server settings section displays an auto-generated username and
+   password.
+5. Register it: dashboard → **OTP & SMS Monitor** → "Add gateway phone" (or
+   `POST /api/sms-gateways`) with the phone's `label`, `username`/`password`,
+   and `device_id` (all shown in the app's Cloud Server settings section) —
+   then trigger a real send via `curl` (see Data model & code above — there's
+   no dashboard button for this yet) to confirm delivery before relying on
+   it. The **Ping** button can't confirm real reachability for this
+   transport.
+
+## Keycloak TOTP 2FA (standalone realm)
+
+`CONFIGURE_TOTP` is set as a **default required action** on the `standalone`
+realm (live Keycloak config only — see the note under "What this repo is",
+this isn't in `keycloak/realm.json`). Any new user in this realm must enroll
+an authenticator app on first login; the existing `admin` user has
+`CONFIGURE_TOTP` queued as a required action too, so they'll be prompted on
+next login. After enrollment, Keycloak's default `browser` flow (`Browser -
+Conditional OTP` → `Condition - user configured` → `OTP Form`, all default
+Keycloak behavior, not custom) automatically requires the OTP code on every
+subsequent login for that user — no custom code, this is Keycloak's built-in
+OTP credential type. Only `standalone` has this; `society-events`
+(event-management's realm) does not.
+
+This exists as a 2FA measure for dashboard logins — it does **not** replace
+or fix phone-number verification (see the SMS carrier-filtering limitation
+above), since TOTP requires a secret already enrolled against a known
+account and has no concept of a phone number at all.
 
 ## Ports
 
@@ -227,9 +255,9 @@ at scale.
 | Backend (FastAPI) | 8000 |
 | Keycloak | 8180 (admin console at `/admin`), management/health on 9000 (internal only) |
 | PostgreSQL | 5433 |
-| Tailscale SOCKS5 proxy | 1055 (internal to the pod only, not published) |
 
-Credentials and API keys (Keycloak admin, `OTP_SERVICE_API_KEY`,
-`TS_AUTHKEY`, Cloudflare token, etc.) live in `.env` — this file is not
-committed with real values in mind, so don't copy secrets from here into
-git-tracked docs.
+Credentials and API keys (Keycloak admin, `OTP_SERVICE_API_KEY`, Cloudflare
+token, etc.) live in `.env` — this file is not committed with real values in
+mind, so don't copy secrets from here into git-tracked docs. SMS Gateway
+Cloud Server username/password are per-gateway secrets stored in the
+`sms_gateways` table via the dashboard, not in `.env`.

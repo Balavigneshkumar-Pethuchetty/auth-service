@@ -16,7 +16,7 @@ import string
 
 from sqlalchemy.orm import Session
 
-from . import models, sms_gateway
+from . import models, sms_gateway, telegram_bot
 from .config import settings
 
 log = logging.getLogger(__name__)
@@ -39,13 +39,22 @@ def _active_request(db: Session, phone: str) -> models.OtpRequest | None:
     )
 
 
-async def request_otp(db: Session, phone: str) -> dict:
+async def request_otp(db: Session, phone: str, channel: str | None = None) -> dict:
     """
     Generate + send an OTP for `phone`, enforcing a per-phone resend cooldown
     and a cap on total resends. A resend reuses the same request row (instead
     of creating a new one) so attempt/resend counters and history stay
     attached to one logical login attempt.
+
+    `channel` is None by default — automatic Telegram-then-SMS preference
+    (see below). Callers that want to *require* a specific channel (rather
+    than just prefer it) pass "telegram" or "sms" explicitly.
     """
+    if channel == "telegram" and not telegram_bot.link_status(db, phone)["linked"]:
+        # Checked before touching cooldown/resend state — an explicit,
+        # unmet precondition shouldn't burn a resend attempt.
+        return {"ok": False, "error": "telegram_not_linked"}
+
     now = datetime.datetime.utcnow()
     existing = _active_request(db, phone)
 
@@ -83,7 +92,22 @@ async def request_otp(db: Session, phone: str) -> dict:
     db.refresh(req)
 
     text = f"Your verification code is {code}. It expires in {settings.otp_ttl_seconds // 60} minutes."
-    result = await sms_gateway.send_otp(db, phone, text)
+
+    if channel == "sms":
+        result = await sms_gateway.send_otp(db, phone, text)
+    elif channel == "telegram":
+        result = await telegram_bot.send_otp(db, phone, text)
+    else:
+        # Automatic: Telegram first when linked — it isn't subject to the
+        # carrier-side OTP-content filtering that affects the SMS gateway
+        # chain (see sms_gateway.py module docstring / CLAUDE.md). Falls
+        # back to SMS gateways otherwise, merging attempt logs from both so
+        # send_log shows the full picture.
+        result = await telegram_bot.send_otp(db, phone, text)
+        if not result.get("sent"):
+            telegram_attempts = result.get("attempts", [])
+            result = await sms_gateway.send_otp(db, phone, text)
+            result["attempts"] = telegram_attempts + result.get("attempts", [])
 
     req.sent_via = result.get("via")
     for attempt in result.get("attempts", []):
@@ -114,17 +138,17 @@ def verify_otp(db: Session, request_id: str, code: str) -> dict:
     now = datetime.datetime.utcnow()
 
     if req.status != "pending":
-        return {"verified": False, "status": req.status}
+        return {"verified": False, "status": req.status, "phone": req.phone}
 
     if not req.expires_at or req.expires_at <= now:
         req.status = "expired"
         db.commit()
-        return {"verified": False, "status": "expired"}
+        return {"verified": False, "status": "expired", "phone": req.phone}
 
     if req.attempts >= req.max_attempts:
         req.status = "locked"
         db.commit()
-        return {"verified": False, "status": "locked"}
+        return {"verified": False, "status": "locked", "phone": req.phone}
 
     req.attempts += 1
     match = _hash_code(req.id, code) == req.code_hash
@@ -133,7 +157,7 @@ def verify_otp(db: Session, request_id: str, code: str) -> dict:
         req.status = "verified"
         req.verified_at = now
         db.commit()
-        return {"verified": True, "status": "verified"}
+        return {"verified": True, "status": "verified", "phone": req.phone}
 
     if req.attempts >= req.max_attempts:
         req.status = "locked"
@@ -142,6 +166,7 @@ def verify_otp(db: Session, request_id: str, code: str) -> dict:
         "verified": False,
         "status": req.status,
         "attempts_remaining": max(0, req.max_attempts - req.attempts),
+        "phone": req.phone,
     }
 
 

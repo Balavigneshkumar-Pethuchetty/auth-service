@@ -49,7 +49,7 @@ function Stat({ label, value, valueClass = "" }) {
   );
 }
 
-const emptyForm = { label: "", host: "", port: 8080, username: "", password: "", priority: 100 };
+const emptyForm = { label: "", username: "", password: "", device_id: "", priority: 100 };
 
 export default function Monitor() {
   const [gateways, setGateways] = useState([]);
@@ -122,7 +122,7 @@ export default function Monitor() {
     setSaving(true);
     setMsg(null);
     try {
-      await createSmsGateway({ ...form, port: Number(form.port), priority: Number(form.priority) });
+      await createSmsGateway({ ...form, priority: Number(form.priority) });
       setForm(emptyForm);
       setShowAdd(false);
       setMsg({ type: "ok", text: "Gateway added" });
@@ -177,10 +177,9 @@ export default function Monitor() {
           <div className="mb-4 text-sm font-semibold">Add SMS Gateway Phone</div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
             <Field label="Label" value={form.label} onChange={(v) => setForm((f) => ({ ...f, label: v }))} placeholder="Bala primary" required />
-            <Field label="Tailscale host/IP" value={form.host} onChange={(v) => setForm((f) => ({ ...f, host: v }))} placeholder="100.119.92.84" required />
-            <Field label="Port" value={form.port} onChange={(v) => setForm((f) => ({ ...f, port: v }))} placeholder="8080" />
-            <Field label="Username" value={form.username} onChange={(v) => setForm((f) => ({ ...f, username: v }))} placeholder="sms" required />
-            <Field label="Password" value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} placeholder="from the app" type="password" required />
+            <Field label="Username" value={form.username} onChange={(v) => setForm((f) => ({ ...f, username: v }))} placeholder="from the app's Cloud Server section" required />
+            <Field label="Password" value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} placeholder="from the app's Cloud Server section" type="password" required />
+            <Field label="Device ID" value={form.device_id} onChange={(v) => setForm((f) => ({ ...f, device_id: v }))} placeholder="from the app's Cloud Server section" required />
             <Field label="Priority (lower = tried first)" value={form.priority} onChange={(v) => setForm((f) => ({ ...f, priority: v }))} placeholder="100" />
           </div>
           <div className="mt-4 flex gap-2">
@@ -220,7 +219,7 @@ export default function Monitor() {
             <thead>
               <tr className="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 <th className="px-5 py-2.5">Label</th>
-                <th className="px-5 py-2.5">Host</th>
+                <th className="px-5 py-2.5">Username</th>
                 <th className="px-5 py-2.5">Priority</th>
                 <th className="px-5 py-2.5">Status</th>
                 <th className="px-5 py-2.5">Last checked</th>
@@ -233,7 +232,7 @@ export default function Monitor() {
                 .map((g) => (
                   <tr key={g.id} className="border-b border-line/60 last:border-0 hover:bg-ink-700/30">
                     <td className="px-5 py-3 font-semibold text-slate-200">{g.label}</td>
-                    <td className="px-5 py-3 font-mono text-xs text-slate-400">{g.host}:{g.port}</td>
+                    <td className="px-5 py-3 font-mono text-xs text-slate-400">{g.username}</td>
                     <td className="px-5 py-3 text-slate-400">{g.priority}</td>
                     <td className="px-5 py-3">
                       <Pill text={g.enabled ? g.last_status : "disabled"} cls={g.enabled ? GATEWAY_STATUS[g.last_status] : GATEWAY_STATUS.unknown} />

@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     otp_pepper: str = ""  # used when hashing codes for storage
     otp_service_api_key: str = ""  # shared secret for the Keycloak authenticator SPI
 
+    # Telegram bot (alternate OTP delivery channel, avoids SMS carrier filtering)
+    telegram_bot_token: str = ""  # from @BotFather
+    telegram_bot_username: str = ""  # bot's @handle, no leading @
+    telegram_webhook_secret: str = ""  # checked against X-Telegram-Bot-Api-Secret-Token
+
+    # Splunk (shared instance in ~/splunk-service, HEC on :8088) — optional,
+    # fire-and-forget; splunk_logger.py no-ops if the token is unset.
+    splunk_hec_url: str = ""
+    splunk_hec_token: str = ""
+
     class Config:
         env_file = ".env"
         env_prefix = ""

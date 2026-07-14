@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -30,20 +30,18 @@ class ServiceOut(BaseModel):
 
 class SmsGatewayCreate(BaseModel):
     label: str
-    host: str
-    port: int = 8080
     username: str
     password: str
+    device_id: str
     priority: int = 100
     enabled: bool = True
 
 
 class SmsGatewayUpdate(BaseModel):
     label: Optional[str] = None
-    host: Optional[str] = None
-    port: Optional[int] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    device_id: Optional[str] = None
     priority: Optional[int] = None
     enabled: Optional[bool] = None
 
@@ -51,9 +49,8 @@ class SmsGatewayUpdate(BaseModel):
 class SmsGatewayOut(BaseModel):
     id: str
     label: str
-    host: str
-    port: int
     username: str
+    device_id: str
     priority: int
     enabled: bool
     last_status: str
@@ -68,6 +65,9 @@ class SmsSendRequest(BaseModel):
 
 class OtpRequestCreate(BaseModel):
     phone: str
+    # None = automatic (Telegram if linked, else SMS — otp_service.py's
+    # existing default behavior). Explicit values opt out of that fallback.
+    channel: Optional[Literal["telegram", "sms"]] = None
 
 
 class OtpVerifyRequest(BaseModel):

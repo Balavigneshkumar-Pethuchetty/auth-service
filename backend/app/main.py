@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from . import cloudflare_api, keycloak_admin, models, otp_service, schemas, sms_gateway
+from . import cloudflare_api, keycloak_admin, models, otp_service, schemas, sms_gateway, telegram_bot
 from .auth import get_current_user
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
@@ -41,6 +41,19 @@ def require_service_key(x_api_key: str = Header(default="")) -> None:
         raise HTTPException(503, "OTP service API key not configured")
     if not hmac.compare_digest(x_api_key, settings.otp_service_api_key):
         raise HTTPException(401, "invalid API key")
+
+
+def require_telegram_secret(x_telegram_bot_api_secret_token: str = Header(default="")) -> None:
+    """
+    Telegram has no request signing — setWebhook's optional secret_token is
+    the only thing stopping a random POST to this public URL from injecting
+    a fake phone->chat_id link (which would let an attacker receive OTPs
+    meant for someone else's number).
+    """
+    if not settings.telegram_webhook_secret:
+        raise HTTPException(503, "Telegram webhook secret not configured")
+    if not hmac.compare_digest(x_telegram_bot_api_secret_token, settings.telegram_webhook_secret):
+        raise HTTPException(401, "invalid webhook secret")
 
 
 def get_domain(db: Session) -> str:
@@ -581,16 +594,15 @@ async def export_realm_to_file(_user: dict = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# SMS gateways (OTP delivery via committee phones, over Tailscale)
+# SMS gateways (OTP delivery via committee phones, over SMS Gateway Cloud Server)
 # ---------------------------------------------------------------------------
 
 def _serialize_gateway(gw: models.SmsGateway) -> dict:
     return {
         "id": gw.id,
         "label": gw.label,
-        "host": gw.host,
-        "port": gw.port,
         "username": gw.username,
+        "device_id": gw.device_id,
         "priority": gw.priority,
         "enabled": gw.enabled,
         "last_status": gw.last_status,
@@ -684,6 +696,19 @@ async def send_sms(
     return await sms_gateway.send_otp(db, payload.phone, payload.message)
 
 
+@app.post("/api/telegram/send")
+async def send_telegram(
+    payload: schemas.SmsSendRequest,
+    db: Session = Depends(get_db),
+    _key: None = Depends(require_service_key),
+):
+    """Telegram counterpart to /api/sms/send above — same machine-to-machine
+    contract and auth. telegram_bot.send_otp is message-agnostic despite the
+    name (see that module's docstring); this just exposes it as a transport
+    for other projects instead of only auth-service's own OTP flow."""
+    return await telegram_bot.send_otp(db, payload.phone, payload.message)
+
+
 # ---------------------------------------------------------------------------
 # event-management OTP transactions (cross-project dashboard proxy)
 # ---------------------------------------------------------------------------
@@ -722,7 +747,7 @@ async def otp_request(
     if not phone:
         raise HTTPException(400, "phone is required")
 
-    result = await otp_service.request_otp(db, phone)
+    result = await otp_service.request_otp(db, phone, channel=payload.channel)
 
     if result.get("error") == "cooldown":
         raise HTTPException(429, {"error": "cooldown", "retry_after": result["retry_after"]})
@@ -748,6 +773,30 @@ def otp_history(
 ):
     """Dashboard-facing audit view — uses normal admin login, not the service key."""
     return otp_service.history(db, phone)
+
+
+# ---------------------------------------------------------------------------
+# Telegram bot (alternate OTP delivery channel — see telegram_bot.py)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/telegram/link")
+def telegram_link(phone: str, db: Session = Depends(get_db)):
+    """Unauthenticated by design — same trust level as /api/otp/request
+    (a phone number, not a secret), used by the login page to show either a
+    'Connect Telegram' deep link or the linked state before requesting an OTP."""
+    return telegram_bot.link_status(db, phone)
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _secret: None = Depends(require_telegram_secret),
+):
+    """Telegram POSTs every bot update here (set via setWebhook — see
+    CLAUDE.md). Only /start deep links are acted on; see handle_update()."""
+    await telegram_bot.handle_update(db, payload)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
